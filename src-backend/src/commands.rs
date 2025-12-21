@@ -116,6 +116,7 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
     let window_clone = window.clone();
     
     tokio::task::spawn_blocking(move || {
+        println!("[RUST] Starting scan of: {}", drive_path_clone);
         let scan_start = std::time::Instant::now();
         let mut files = Vec::new();
         let mut total_size: u64 = 0;
@@ -165,6 +166,7 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
             }
         }
         
+        println!("[RUST] Scan completed! Files: {}, Size: {}", files.len(), total_size);
         let scan_duration = scan_start.elapsed().as_secs();
 
         let timestamp = chrono::Utc::now().timestamp();
@@ -180,11 +182,24 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
             files,
         };
 
+        println!("[RUST] Saving snapshot to disk...");
         // Save snapshot to disk with optional encryption
         save_snapshot(&snapshot, encrypt, password.as_deref())?;
+        println!("[RUST] Snapshot saved successfully!");
 
-        // Return a summary instead of full snapshot to reduce memory
-        Ok(snapshot)
+        // Return a lightweight summary instead of full snapshot to avoid IPC overflow
+        let summary = Snapshot {
+            id: snapshot.id,
+            drive_path: snapshot.drive_path,
+            timestamp: snapshot.timestamp,
+            total_files: snapshot.total_files,
+            total_size: snapshot.total_size,
+            scan_duration: snapshot.scan_duration,
+            files: Vec::new(), // Don't send millions of file entries over IPC
+        };
+        
+        println!("[RUST] Returning summary to frontend");
+        Ok(summary)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?

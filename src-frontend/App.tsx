@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/api/dialog";
@@ -75,13 +75,17 @@ function App() {
   const [encrypt, setEncrypt] = useState(false);
   const [password, setPassword] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const scanningRef = useRef(false);
 
   useEffect(() => {
     loadHistory();
     loadDrives();
 
     const unlisten = listen<ScanProgress>("scan-progress", (event) => {
-      setScanProgress(event.payload);
+      // Only update progress if we're currently scanning
+      if (scanningRef.current) {
+        setScanProgress(event.payload);
+      }
     });
 
     return () => {
@@ -139,6 +143,7 @@ function App() {
     }
 
     setScanning(true);
+    scanningRef.current = true;
     setScanProgress(null);
     setError("");
 
@@ -150,6 +155,7 @@ function App() {
       });
 
       // Explicitly clear scanning state and progress before saving
+      scanningRef.current = false;
       setScanning(false);
       setScanProgress(null);
       setSaving(true);
@@ -167,6 +173,7 @@ function App() {
     } catch (err) {
       setError(`Scan failed: ${err}`);
     } finally {
+      scanningRef.current = false;
       setScanning(false);
       setSaving(false);
       setScanProgress(null);
@@ -350,7 +357,7 @@ function App() {
           </Box>
 
           {/* Progress */}
-          {scanning && scanProgress && (
+          {scanningRef.current && scanProgress && (
             <Paper variant="outlined" sx={{ p: 2 }}>
               <LinearProgress sx={{ mb: 2 }} />
               <Stack spacing={1}>
