@@ -34,6 +34,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsoup2.4-dev pkg-config
 
+      - name: Install additional dependencies for JavaScriptCoreGTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjavascriptcoregtk-4.0-dev pkg-config
+
       - name: Build the binary
         env:
           PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
