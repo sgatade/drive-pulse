@@ -51,7 +51,8 @@
         "resizable": true,
         "title": "Drive Pulse",
         "width": 1200,
-        "height": 800
+        "height": 800,
+        "center": true
       }
     ]
   }

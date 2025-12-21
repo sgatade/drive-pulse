@@ -185,6 +185,10 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
         println!("[RUST] Saving snapshot to disk...");
         // Save snapshot to disk with optional encryption
         save_snapshot(&snapshot, encrypt, password.as_deref())?;
+        
+        // Save metadata separately for fast history loading
+        save_snapshot_metadata(&snapshot)?;
+        
         println!("[RUST] Snapshot saved successfully!");
 
         // Return a lightweight summary instead of full snapshot to avoid IPC overflow
@@ -208,75 +212,28 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
 #[tauri::command]
 pub fn get_scan_history() -> Result<Vec<SnapshotSummary>, String> {
     let data_dir = get_data_dir()?;
-    let snapshots_dir = data_dir.join("snapshots");
+    let metadata_dir = data_dir.join("metadata");
 
-    if !snapshots_dir.exists() {
+    if !metadata_dir.exists() {
         return Ok(Vec::new());
     }
 
     let mut summaries = Vec::new();
 
-    for entry in fs::read_dir(&snapshots_dir).map_err(|e| e.to_string())? {
+    // Read from fast metadata files instead of full snapshots
+    for entry in fs::read_dir(&metadata_dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
 
-        // Support both .json (legacy) and .bin (new) formats
-        let ext = path.extension().and_then(|s| s.to_str());
-        if ext == Some("json") || ext == Some("bin") {
-            // Read basic info from file without decrypting
-            // For encrypted files, we can't read the content without password
-            // So we'll read what we can from the filename
-            let filename = path.file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or("Invalid filename")?;
-            
-            if ext == Some("json") {
-                // Legacy JSON format - read full content
-                let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-                let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-                let snapshot: Snapshot = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-                summaries.push(SnapshotSummary {
-                    id: snapshot.id,
-                    drive_path: snapshot.drive_path,
-                    timestamp: snapshot.timestamp,
-                    total_files: snapshot.total_files,
-                    total_size: snapshot.total_size,
-                    scan_duration: snapshot.scan_duration,
-                });
-            } else {
-                // New binary format - try to read unencrypted
-                // For encrypted files, we'll need to attempt decryption or show as "locked"
-                match load_snapshot_binary(filename, None) {
-                    Ok(snapshot) => {
-                        summaries.push(SnapshotSummary {
-                            id: snapshot.id,
-                            drive_path: snapshot.drive_path,
-                            timestamp: snapshot.timestamp,
-                            total_files: snapshot.total_files,
-                            total_size: snapshot.total_size,
-                            scan_duration: snapshot.scan_duration,
-                        });
-                    }
-                    Err(_) => {
-                        // Likely encrypted - parse info from filename
-                        // Format: timestamp_drivepath
-                        let parts: Vec<&str> = filename.split('_').collect();
-                        if let Some(timestamp_str) = parts.first() {
-                            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
-                                let drive_path = parts[1..].join("_").replace('_', ":");
-                                summaries.push(SnapshotSummary {
-                                    id: filename.to_string(),
-                                    drive_path,
-                                    timestamp,
-                                    total_files: 0, // Unknown for encrypted
-                                    total_size: 0,  // Unknown for encrypted
-                                    scan_duration: 0, // Unknown for encrypted
-                                });
-                            }
-                        }
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            match fs::read_to_string(&path) {
+                Ok(content) => {
+                    match serde_json::from_str::<SnapshotSummary>(&content) {
+                        Ok(summary) => summaries.push(summary),
+                        Err(_) => continue, // Skip invalid metadata files
                     }
                 }
+                Err(_) => continue, // Skip unreadable files
             }
         }
     }
@@ -405,15 +362,24 @@ pub fn open_data_directory() -> Result<(), String> {
 pub fn delete_snapshot(snapshot_id: String) -> Result<(), String> {
     let data_dir = get_data_dir()?;
     let snapshots_dir = data_dir.join("snapshots");
+    let metadata_dir = data_dir.join("metadata");
     
-    // Try both .json and .bin extensions
+    // Try both .json and .bin extensions for snapshot
     let json_path = snapshots_dir.join(format!("{}.json", snapshot_id));
     let bin_path = snapshots_dir.join(format!("{}.bin", snapshot_id));
+    
+    // Delete metadata file
+    let metadata_path = metadata_dir.join(format!("{}.json", snapshot_id));
 
     if json_path.exists() {
         fs::remove_file(json_path).map_err(|e| e.to_string())?;
     } else if bin_path.exists() {
         fs::remove_file(bin_path).map_err(|e| e.to_string())?;
+    }
+    
+    // Also remove metadata file if it exists
+    if metadata_path.exists() {
+        fs::remove_file(metadata_path).map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -481,6 +447,31 @@ fn save_snapshot(snapshot: &Snapshot, encrypt: bool, password: Option<&str>) -> 
     file.write_all(&data_to_write)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
+    Ok(())
+}
+
+fn save_snapshot_metadata(snapshot: &Snapshot) -> Result<(), String> {
+    let data_dir = get_data_dir()?;
+    let metadata_dir = data_dir.join("metadata");
+    
+    fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
+    
+    let summary = SnapshotSummary {
+        id: snapshot.id.clone(),
+        drive_path: snapshot.drive_path.clone(),
+        timestamp: snapshot.timestamp,
+        total_files: snapshot.total_files,
+        total_size: snapshot.total_size,
+        scan_duration: snapshot.scan_duration,
+    };
+    
+    let metadata_path = metadata_dir.join(format!("{}.json", snapshot.id));
+    let json = serde_json::to_string(&summary)
+        .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+    
+    fs::write(&metadata_path, json)
+        .map_err(|e| format!("Failed to write metadata: {}", e))?;
+    
     Ok(())
 }
 
