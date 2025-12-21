@@ -19,7 +19,14 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev pkg-config
+
       - name: Build the binary
+        env:
+          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
         run: |
           cd src-backend
           cargo build --release
