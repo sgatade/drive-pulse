@@ -15,6 +15,7 @@ pub struct Snapshot {
     pub timestamp: i64,
     pub total_files: usize,
     pub total_size: u64,
+    pub scan_duration: u64, // Duration in seconds
     pub files: Vec<FileEntry>,
 }
 
@@ -25,6 +26,7 @@ pub struct SnapshotSummary {
     pub timestamp: i64,
     pub total_files: usize,
     pub total_size: u64,
+    pub scan_duration: u64, // Duration in seconds
 }
 
 #[derive(Debug, Serialize, Deserialize)]

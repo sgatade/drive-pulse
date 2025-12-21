@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/api/dialog";
-import "./styles.css";
+import { Container, Box, Typography, Button, Select, MenuItem, TextField, FormControlLabel, Checkbox, Paper, Grid, Card, CardContent, CardActions, IconButton, Alert, LinearProgress, Chip, Stack, InputLabel, FormControl, Divider, CircularProgress, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { Search as SearchIcon, Refresh as RefreshIcon, Delete as DeleteIcon, Folder as FolderIcon, CompareArrows as CompareArrowsIcon, Lock as LockIcon, Storage as StorageIcon, FolderOpen as FolderOpenIcon, Add as AddIcon, Remove as RemoveIcon, Edit as EditIcon } from "@mui/icons-material";
 
 interface FileEntry {
   path: string;
@@ -17,6 +18,7 @@ interface Snapshot {
   timestamp: number;
   total_files: number;
   total_size: number;
+  scan_duration: number;
   files: FileEntry[];
 }
 
@@ -26,6 +28,7 @@ interface SnapshotSummary {
   timestamp: number;
   total_files: number;
   total_size: number;
+  scan_duration: number;
 }
 
 interface FileDiff {
@@ -68,6 +71,7 @@ function App() {
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [error, setError] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingDrives, setLoadingDrives] = useState(true);
   const [encrypt, setEncrypt] = useState(false);
   const [password, setPassword] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -76,7 +80,6 @@ function App() {
     loadHistory();
     loadDrives();
 
-    // Listen for scan progress events
     const unlisten = listen<ScanProgress>("scan-progress", (event) => {
       setScanProgress(event.payload);
     });
@@ -87,11 +90,14 @@ function App() {
   }, []);
 
   const loadDrives = async () => {
+    setLoadingDrives(true);
     try {
       const drives = await invoke<DriveInfo[]>("get_available_drives");
       setAvailableDrives(drives);
     } catch (err) {
       console.error("Failed to load drives:", err);
+    } finally {
+      setLoadingDrives(false);
     }
   };
 
@@ -137,27 +143,23 @@ function App() {
     setError("");
 
     try {
-      // Show saving indicator when file count is high
       const snapshot = await invoke<Snapshot>("scan_drive", {
         drivePath,
         encrypt,
         password: encrypt ? password : null,
       });
 
-      setSaving(true);
+      // Explicitly clear scanning state and progress before saving
+      setScanning(false);
       setScanProgress(null);
+      setSaving(true);
 
-      // Small delay to show saving state
       await new Promise((resolve) => setTimeout(resolve, 100));
-
-      // Reload history to show new snapshot
       await loadHistory();
 
-      // Show success notification
-      const message = `✅ Scan complete! ${snapshot.total_files.toLocaleString()} files scanned (${formatBytes(snapshot.total_size)})${encrypt ? " 🔒 Encrypted" : ""}`;
+      const message = `Scan complete! ${snapshot.total_files.toLocaleString()} files scanned (${formatBytes(snapshot.total_size)})${encrypt ? " - Encrypted" : ""}`;
       setSuccessMessage(message);
 
-      // Clear success message after 5 seconds
       setTimeout(() => setSuccessMessage(""), 5000);
 
       setDrivePath("");
@@ -201,7 +203,6 @@ function App() {
 
     setError("");
     try {
-      // Check if encrypted snapshots need password
       const needsPassword = snapshots.find((s) => (s.id === selectedSnapshots[0] || s.id === selectedSnapshots[1]) && s.total_files === 0);
 
       let pwd = null;
@@ -245,190 +246,314 @@ function App() {
     return new Date(timestamp * 1000).toLocaleString();
   };
 
+  const formatDuration = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${secs}s`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  };
+
   return (
-    <div className="container">
-      <div className="header">
-        <h1>🔍 Drive Pulse</h1>
-        <p>Scan drives and compare snapshots</p>
-      </div>
+    <Container maxWidth="xl" sx={{ py: 2, px: 2 }}>
+      {/* Header */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h4" component="h1" sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+          <SearchIcon /> Drive Pulse
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Scan drives and compare snapshots
+        </Typography>
+      </Box>
 
-      {error && <div className="error">{error}</div>}
-      {successMessage && <div className="success">{successMessage}</div>}
+      {/* Alerts */}
+      {error && (
+        <Alert severity="error" onClose={() => setError("")} sx={{ mb: 1.5 }}>
+          {error}
+        </Alert>
+      )}
+      {successMessage && (
+        <Alert severity="success" onClose={() => setSuccessMessage("")} sx={{ mb: 1.5 }}>
+          {successMessage}
+        </Alert>
+      )}
 
-      <div className="scan-section">
-        <h2>New Scan</h2>
-        <div className="scan-controls">
-          <select value={drivePath} onChange={(e) => setDrivePath(e.target.value)} disabled={scanning}>
-            <option value="">Select a drive...</option>
-            {availableDrives.map((drive) => (
-              <option key={drive.path} value={drive.path}>
-                {drive.label}
-              </option>
-            ))}
-            <option value="custom">Custom Path...</option>
-          </select>
-          {drivePath === "custom" && (
-            <>
-              <input type="text" value={drivePath !== "custom" ? drivePath : ""} onChange={(e) => setDrivePath(e.target.value)} placeholder="Enter custom path..." />
-              <button onClick={selectFolder}>Browse</button>
-            </>
+      {/* Scan Section */}
+      <Paper elevation={2} sx={{ p: 2, mb: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1.5 }}>
+          New Scan
+        </Typography>
+
+        <Stack spacing={1.5}>
+          <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel>Select Drive</InputLabel>
+              <Select
+                value={drivePath}
+                onChange={(e) => {
+                  const selectedValue = e.target.value as string;
+                  console.log("onChange fired:", selectedValue);
+                  setDrivePath(selectedValue);
+                }}
+                disabled={scanning || loadingDrives}
+                label="Select Drive"
+                size="small"
+              >
+                <MenuItem value="">
+                  {loadingDrives ? (
+                    <>
+                      <CircularProgress size={16} sx={{ mr: 1 }} />
+                      Loading drives...
+                    </>
+                  ) : (
+                    "Select a drive..."
+                  )}
+                </MenuItem>
+                {availableDrives.map((drive) => (
+                  <MenuItem key={drive.path} value={drive.path}>
+                    {drive.label}
+                  </MenuItem>
+                ))}
+                <MenuItem value="custom">Custom Path...</MenuItem>
+              </Select>
+            </FormControl>
+
+            <IconButton onClick={loadDrives} disabled={scanning || loadingDrives} color="primary" title="Refresh drives list">
+              {loadingDrives ? <CircularProgress size={24} /> : <RefreshIcon />}
+            </IconButton>
+
+            {drivePath === "custom" && (
+              <>
+                <TextField value={drivePath !== "custom" ? drivePath : ""} onChange={(e) => setDrivePath(e.target.value)} placeholder="Enter custom path..." sx={{ minWidth: 250 }} />
+                <Button onClick={selectFolder} variant="outlined" startIcon={<FolderOpenIcon />}>
+                  Browse
+                </Button>
+              </>
+            )}
+
+            <FormControlLabel
+              control={<Checkbox checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} disabled={scanning} />}
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <LockIcon fontSize="small" /> Encrypt
+                </Box>
+              }
+            />
+
+            {encrypt && <TextField type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Encryption password..." disabled={scanning} size="small" sx={{ minWidth: 200 }} />}
+
+            <Button onClick={handleScan} disabled={scanning || !drivePath || drivePath === "custom"} variant="contained" startIcon={<SearchIcon />}>
+              {scanning ? "Scanning..." : "Scan Drive"}
+            </Button>
+          </Box>
+
+          {/* Progress */}
+          {scanning && scanProgress && (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <LinearProgress sx={{ mb: 2 }} />
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  <strong>Files scanned:</strong> {scanProgress.files_scanned.toLocaleString()}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Total size:</strong> {formatBytes(scanProgress.total_size)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                  <strong>Current:</strong> {scanProgress.current_path}
+                </Typography>
+              </Stack>
+            </Paper>
           )}
-          <button onClick={handleScan} disabled={scanning || !drivePath || drivePath === "custom"}>
-            {scanning ? "Scanning..." : "Scan Drive"}
-          </button>
-        </div>
 
-        <div className="encryption-controls">
-          <label className="checkbox-label">
-            <input type="checkbox" checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} disabled={scanning} />
-            <span>🔒 Encrypt snapshot</span>
-          </label>
-          {encrypt && <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter encryption password..." disabled={scanning} className="password-input" />}
-        </div>
-
-        {scanning && scanProgress && (
-          <div className="scan-progress">
-            <div className="progress-info">
-              <div>
-                <strong>Files scanned:</strong> {scanProgress.files_scanned.toLocaleString()}
-              </div>
-              <div>
-                <strong>Total size:</strong> {formatBytes(scanProgress.total_size)}
-              </div>
-            </div>
-            <div className="current-file">
-              <strong>Current:</strong> {scanProgress.current_path}
-            </div>
-          </div>
-        )}
-        {saving && (
-          <div className="scan-progress">
-            <div className="progress-info" style={{ justifyContent: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                <div className="spinner-small"></div>
+          {saving && (
+            <Paper variant="outlined" sx={{ p: 2, display: "flex", alignItems: "center", gap: 2, justifyContent: "center" }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2">
                 <strong>Saving snapshot to disk...</strong>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+              </Typography>
+            </Paper>
+          )}
+        </Stack>
+      </Paper>
 
-      <div className="history-section">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-          <h2>Scan History ({snapshots.length})</h2>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button onClick={loadHistory} disabled={loadingHistory} style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}>
-              {loadingHistory ? "⏳ Loading..." : "🔄 Refresh"}
-            </button>
-            <button onClick={showDataLocation} style={{ fontSize: "0.875rem", padding: "0.5rem 1rem" }}>
-              📁 Show Storage
-            </button>
-          </div>
-        </div>
-        {selectedSnapshots.length > 0 && (
-          <div style={{ marginTop: "1rem" }}>
-            <button onClick={handleCompare} disabled={selectedSnapshots.length !== 2}>
-              Compare Selected ({selectedSnapshots.length}/2)
-            </button>
-          </div>
-        )}
+      {/* History Section */}
+      <Paper elevation={2} sx={{ p: 2, mb: 2 }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1.5 }}>
+          <Typography variant="h6">Scan History ({snapshots.length})</Typography>
+          <Stack direction="row" spacing={1}>
+            <Button onClick={handleCompare} disabled={selectedSnapshots.length !== 2} variant="contained" startIcon={<CompareArrowsIcon />} size="small">
+              Compare ({selectedSnapshots.length}/2)
+            </Button>
+            <Button onClick={loadHistory} disabled={loadingHistory} startIcon={<RefreshIcon />} size="small">
+              Refresh
+            </Button>
+            <Button onClick={showDataLocation} startIcon={<FolderOpenIcon />} size="small">
+              Show Storage
+            </Button>
+          </Stack>
+        </Box>
+
         {loadingHistory ? (
-          <div className="loading-container">
-            <div className="spinner"></div>
-            <p>Loading scan history...</p>
-          </div>
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <CircularProgress />
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              Loading scan history...
+            </Typography>
+          </Box>
         ) : snapshots.length === 0 ? (
-          <div className="empty-state">
-            <p>No scans yet. Select a drive above to create your first snapshot.</p>
-          </div>
+          <Box sx={{ textAlign: "center", py: 2, color: "text.secondary" }}>
+            <Typography>No scans yet. Select a drive above to create your first snapshot.</Typography>
+          </Box>
         ) : (
-          <div className="snapshots-grid">
-            {snapshots.map((snapshot) => (
-              <div key={snapshot.id} className={`snapshot-card ${selectedSnapshots.includes(snapshot.id) ? "selected" : ""}`} onClick={() => toggleSnapshot(snapshot.id)}>
-                <div className="snapshot-header">
-                  <strong>{snapshot.drive_path}</strong>
-                  <button className="delete-btn" onClick={(e) => handleDelete(snapshot.id, e)}>
-                    Delete
-                  </button>
-                </div>
-                <div className="snapshot-info">
-                  <div>{formatDate(snapshot.timestamp)}</div>
-                  <div>{snapshot.total_files.toLocaleString()} files</div>
-                  <div>{formatBytes(snapshot.total_size)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox"></TableCell>
+                  <TableCell>Drive Path</TableCell>
+                  <TableCell>Timestamp</TableCell>
+                  <TableCell align="right">Files</TableCell>
+                  <TableCell align="right">Size</TableCell>
+                  <TableCell align="right">Duration</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {snapshots.map((snapshot) => (
+                  <TableRow
+                    key={snapshot.id}
+                    hover
+                    onClick={() => toggleSnapshot(snapshot.id)}
+                    sx={{
+                      cursor: "pointer",
+                      bgcolor: selectedSnapshots.includes(snapshot.id) ? "primary.50" : "inherit",
+                      "&.MuiTableRow-hover:hover": {
+                        bgcolor: selectedSnapshots.includes(snapshot.id) ? "primary.100" : "action.hover",
+                      },
+                    }}
+                  >
+                    <TableCell padding="checkbox">
+                      <Checkbox checked={selectedSnapshots.includes(snapshot.id)} onChange={() => toggleSnapshot(snapshot.id)} onClick={(e) => e.stopPropagation()} />
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <StorageIcon fontSize="small" color="action" />
+                        {snapshot.drive_path}
+                      </Box>
+                    </TableCell>
+                    <TableCell>{formatDate(snapshot.timestamp)}</TableCell>
+                    <TableCell align="right">{snapshot.total_files.toLocaleString()}</TableCell>
+                    <TableCell align="right">{formatBytes(snapshot.total_size)}</TableCell>
+                    <TableCell align="right">{formatDuration(snapshot.scan_duration)}</TableCell>
+                    <TableCell align="center">
+                      <IconButton onClick={(e) => handleDelete(snapshot.id, e)} color="error" size="small">
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
-      </div>
+      </Paper>
 
+      {/* Comparison Results */}
       {comparison && (
-        <div className="compare-section">
-          <h2>Comparison Results</h2>
-          <div className="diff-summary">
-            <div className="diff-stat">
-              <span className="diff-stat-number added">{comparison.added.length}</span>
-              <div>Added</div>
-            </div>
-            <div className="diff-stat">
-              <span className="diff-stat-number deleted">{comparison.deleted.length}</span>
-              <div>Deleted</div>
-            </div>
-            <div className="diff-stat">
-              <span className="diff-stat-number modified">{comparison.modified.length}</span>
-              <div>Modified</div>
-            </div>
-            <div className="diff-stat">
-              <span className="diff-stat-number">{comparison.unchanged_count}</span>
-              <div>Unchanged</div>
-            </div>
-          </div>
+        <Paper elevation={2} sx={{ p: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1.5 }}>
+            Comparison Results
+          </Typography>
 
-          <div className="diff-details">
+          <Grid container spacing={1} sx={{ mb: 2 }}>
+            <Grid item xs={6} sm={3}>
+              <Paper sx={{ p: 1.5, textAlign: "center", bgcolor: "success.50" }}>
+                <Typography variant="h5" color="success.main">
+                  {comparison.added.length}
+                </Typography>
+                <Typography variant="caption">Added</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Paper sx={{ p: 1.5, textAlign: "center", bgcolor: "error.50" }}>
+                <Typography variant="h5" color="error.main">
+                  {comparison.deleted.length}
+                </Typography>
+                <Typography variant="body2">Deleted</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Paper sx={{ p: 1.5, textAlign: "center", bgcolor: "warning.50" }}>
+                <Typography variant="h5" color="warning.main">
+                  {comparison.modified.length}
+                </Typography>
+                <Typography variant="caption">Modified</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Paper sx={{ p: 1.5, textAlign: "center", bgcolor: "grey.100" }}>
+                <Typography variant="h5">{comparison.unchanged_count}</Typography>
+                <Typography variant="caption">Unchanged</Typography>
+              </Paper>
+            </Grid>
+          </Grid>
+
+          <Stack spacing={2}>
             {comparison.added.length > 0 && (
-              <div>
-                <h3 className="added">Added Files ({comparison.added.length})</h3>
-                <div className="diff-list">
+              <Box>
+                <Typography variant="subtitle1" color="success.main" sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+                  <AddIcon fontSize="small" /> Added Files ({comparison.added.length})
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflow: "auto" }}>
                   {comparison.added.map((diff, idx) => (
-                    <div key={idx} className="diff-item added">
+                    <Typography key={idx} variant="body2" sx={{ py: 0.5, fontFamily: "monospace" }}>
                       + {diff.path} ({formatBytes(diff.new_size || 0)})
-                    </div>
+                    </Typography>
                   ))}
-                </div>
-              </div>
+                </Paper>
+              </Box>
             )}
 
             {comparison.deleted.length > 0 && (
-              <div>
-                <h3 className="deleted">Deleted Files ({comparison.deleted.length})</h3>
-                <div className="diff-list">
+              <Box>
+                <Typography variant="subtitle1" color="error.main" sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+                  <Remove fontSize="small" /> Deleted Files ({comparison.deleted.length})
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflow: "auto" }}>
                   {comparison.deleted.map((diff, idx) => (
-                    <div key={idx} className="diff-item deleted">
+                    <Typography key={idx} variant="body2" sx={{ py: 0.5, fontFamily: "monospace" }}>
                       - {diff.path} ({formatBytes(diff.old_size || 0)})
-                    </div>
+                    </Typography>
                   ))}
-                </div>
-              </div>
+                </Paper>
+              </Box>
             )}
 
             {comparison.modified.length > 0 && (
-              <div>
-                <h3 className="modified">Modified Files ({comparison.modified.length})</h3>
-                <div className="diff-list">
+              <Box>
+                <Typography variant="subtitle1" color="warning.main" sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+                  <EditIcon fontSize="small" /> Modified Files ({comparison.modified.length})
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflow: "auto" }}>
                   {comparison.modified.map((diff, idx) => (
-                    <div key={idx} className="diff-item modified">
-                      ~ {diff.path}
-                      <br />
-                      &nbsp;&nbsp;Size: {formatBytes(diff.old_size || 0)} → {formatBytes(diff.new_size || 0)}
-                    </div>
+                    <Box key={idx} sx={{ py: 0.5 }}>
+                      <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                        ~ {diff.path}
+                      </Typography>
+                      <Typography variant="caption" sx={{ pl: 2, color: "text.secondary", fontFamily: "monospace" }}>
+                        Size: {formatBytes(diff.old_size || 0)} → {formatBytes(diff.new_size || 0)}
+                      </Typography>
+                    </Box>
                   ))}
-                </div>
-              </div>
+                </Paper>
+              </Box>
             )}
-          </div>
-        </div>
+          </Stack>
+        </Paper>
       )}
-    </div>
+    </Container>
   );
 }
 

@@ -116,6 +116,7 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
     let window_clone = window.clone();
     
     tokio::task::spawn_blocking(move || {
+        let scan_start = std::time::Instant::now();
         let mut files = Vec::new();
         let mut total_size: u64 = 0;
         let mut progress_counter = 0;
@@ -163,6 +164,8 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
                 });
             }
         }
+        
+        let scan_duration = scan_start.elapsed().as_secs();
 
         let timestamp = chrono::Utc::now().timestamp();
         let id = format!("{}_{}", timestamp, drive_path_clone.replace([':', '\\', '/'], "_"));
@@ -173,6 +176,7 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
             timestamp,
             total_files: files.len(),
             total_size,
+            scan_duration,
             files,
         };
 
@@ -223,6 +227,7 @@ pub fn get_scan_history() -> Result<Vec<SnapshotSummary>, String> {
                     timestamp: snapshot.timestamp,
                     total_files: snapshot.total_files,
                     total_size: snapshot.total_size,
+                    scan_duration: snapshot.scan_duration,
                 });
             } else {
                 // New binary format - try to read unencrypted
@@ -235,6 +240,7 @@ pub fn get_scan_history() -> Result<Vec<SnapshotSummary>, String> {
                             timestamp: snapshot.timestamp,
                             total_files: snapshot.total_files,
                             total_size: snapshot.total_size,
+                            scan_duration: snapshot.scan_duration,
                         });
                     }
                     Err(_) => {
@@ -250,6 +256,7 @@ pub fn get_scan_history() -> Result<Vec<SnapshotSummary>, String> {
                                     timestamp,
                                     total_files: 0, // Unknown for encrypted
                                     total_size: 0,  // Unknown for encrypted
+                                    scan_duration: 0, // Unknown for encrypted
                                 });
                             }
                         }

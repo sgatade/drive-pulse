@@ -54,7 +54,6 @@ body {
   width: 100%;
   height: 100vh;
   margin: 0 auto;
-  text-align: center;
   overflow-y: auto;
 }
 
@@ -140,6 +139,33 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.drive-selector {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.refresh-btn {
+  padding: 0.625rem 0.875rem;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  font-size: 1.125rem;
+  min-width: auto;
+  cursor: pointer;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .encryption-controls {
