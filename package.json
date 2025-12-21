@@ -1,6 +1,6 @@
 {
   "name": "drive-pulse",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Cross-platform drive scanner with snapshot comparison",
   "type": "module",
   "scripts": {
