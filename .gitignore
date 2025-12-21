@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 # Tauri
-/src-tauri/target
+/src-backend/target

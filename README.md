@@ -42,7 +42,7 @@ This will start the Vite dev server and launch the Tauri application window.
 npm run tauri build
 ```
 
-The compiled application will be in `src-tauri/target/release/bundle/`.
+The compiled application will be in `src-backend/target/release/bundle/`.
 
 ## How It Works
 
@@ -91,11 +91,11 @@ Snapshots are stored as JSON files in the application data directory:
 
 ```
 drive-pulse/
-├── src/                    # React frontend
+├── src-frontend/          # React frontend
 │   ├── App.tsx            # Main app component
 │   ├── main.tsx           # React entry point
 │   └── styles.css         # Global styles
-├── src-tauri/             # Rust backend
+├── src-backend/           # Rust backend
 │   ├── src/
 │   │   ├── main.rs        # Tauri app entry
 │   │   ├── commands.rs    # Tauri commands

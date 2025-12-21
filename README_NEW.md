@@ -194,7 +194,7 @@ Each file diff includes:
 
 ```bash
 # Clean and rebuild
-rm -rf node_modules dist src-tauri/target
+rm -rf node_modules dist src-backend/target
 npm install
 npm run tauri build
 ```
