@@ -2,12 +2,46 @@ mod backend;
 
 use clap::{App, Arg, SubCommand};
 use dialoguer::{Input, Select, Confirm};
+use rustyline::completion::{Completer, FilenameCompleter, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::{Editor, Context};
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::Helper;
 use chrono::{DateTime, Local};
 use console::style;
 use prettytable::{Table, Row, Cell};
 use std::fs;
 use drive_pulse_lib::DiffStatus;
 use drive_pulse_lib::{scan_drive, compare_snapshots, save_snapshot, get_scan_history, load_snapshot};
+
+struct PathHelper {
+    completer: FilenameCompleter,
+}
+
+impl Completer for PathHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        self.completer.complete(line, pos, ctx)
+    }
+}
+
+impl Hinter for PathHelper {
+    type Hint = String;
+}
+
+impl Highlighter for PathHelper {}
+
+impl Validator for PathHelper {}
+
+impl Helper for PathHelper {}
 
 fn main() {
     let matches = App::new("Drive Pulse CLI")
@@ -87,10 +121,24 @@ fn handle_scan(matches: &clap::ArgMatches) -> Result<(), String> {
     let path = match matches.value_of("path") {
         Some(p) => p.to_string(),
         None => {
-            Input::new()
-                .with_prompt("Enter path to scan")
-                .interact()
-                .map_err(|e| format!("Failed to get input: {}", e))?
+            let mut rl = Editor::new().map_err(|e| format!("Failed to create editor: {}", e))?;
+            rl.set_helper(Some(PathHelper {
+                completer: FilenameCompleter::new(),
+            }));
+            
+            println!("\n{}", style("Enter path to scan (use Tab for autocomplete):").cyan());
+            match rl.readline("Path: ") {
+                Ok(line) => line.trim().to_string(),
+                Err(ReadlineError::Interrupted) => {
+                    return Err("Cancelled by user".to_string());
+                }
+                Err(ReadlineError::Eof) => {
+                    return Err("EOF".to_string());
+                }
+                Err(err) => {
+                    return Err(format!("Failed to read input: {}", err));
+                }
+            }
         }
     };
 

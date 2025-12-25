@@ -9,7 +9,8 @@ path = "main.rs"
 
 [dependencies]
 clap = "2.33"
-dialoguer = "0.10"
+dialoguer = { version = "0.10", features = ["completion"] }
+rustyline = "13.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 csv = "1.2"
