@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-mod models;
 
 use commands::{scan_drive, get_scan_history, compare_snapshots, delete_snapshot, get_data_directory, open_data_directory, get_available_drives};
 

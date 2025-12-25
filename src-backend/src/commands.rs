@@ -1,9 +1,9 @@
-use crate::models::{FileEntry, Snapshot, SnapshotSummary, FileDiff, DiffStatus, ComparisonResult};
+use drive_pulse_lib::{FileEntry, Snapshot, SnapshotSummary, FileDiff, DiffStatus, ComparisonResult};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use tauri::{api::path::app_data_dir, Window};
+use tauri::{Window};
 use walkdir::WalkDir;
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -184,10 +184,10 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
 
         println!("[RUST] Saving snapshot to disk...");
         // Save snapshot to disk with optional encryption
-        save_snapshot(&snapshot, encrypt, password.as_deref())?;
+        drive_pulse_lib::save_snapshot(&snapshot, encrypt, password.as_deref())?;
         
         // Save metadata separately for fast history loading
-        save_snapshot_metadata(&snapshot)?;
+        drive_pulse_lib::save_snapshot_metadata(&snapshot)?;
         
         println!("[RUST] Snapshot saved successfully!");
 
@@ -211,120 +211,26 @@ pub async fn scan_drive(drive_path: String, encrypt: bool, password: Option<Stri
 
 #[tauri::command]
 pub fn get_scan_history() -> Result<Vec<SnapshotSummary>, String> {
-    let data_dir = get_data_dir()?;
-    let metadata_dir = data_dir.join("metadata");
-
-    if !metadata_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut summaries = Vec::new();
-
-    // Read from fast metadata files instead of full snapshots
-    for entry in fs::read_dir(&metadata_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-
-        if path.extension().and_then(|s| s.to_str()) == Some("json") {
-            match fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str::<SnapshotSummary>(&content) {
-                        Ok(summary) => summaries.push(summary),
-                        Err(_) => continue, // Skip invalid metadata files
-                    }
-                }
-                Err(_) => continue, // Skip unreadable files
-            }
-        }
-    }
-
-    // Sort by timestamp descending (newest first)
-    summaries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-    Ok(summaries)
+    drive_pulse_lib::get_scan_history()
 }
 
 #[tauri::command]
 pub fn compare_snapshots(snapshot1_id: String, snapshot2_id: String, password: Option<String>) -> Result<ComparisonResult, String> {
-    let snapshot1 = load_snapshot(&snapshot1_id, password.as_deref())?;
-    let snapshot2 = load_snapshot(&snapshot2_id, password.as_deref())?;
-
-    let mut map1: HashMap<String, &FileEntry> = HashMap::new();
-    for file in &snapshot1.files {
-        map1.insert(file.path.clone(), file);
-    }
-
-    let mut map2: HashMap<String, &FileEntry> = HashMap::new();
-    for file in &snapshot2.files {
-        map2.insert(file.path.clone(), file);
-    }
-
-    let mut added = Vec::new();
-    let mut deleted = Vec::new();
-    let mut modified = Vec::new();
-    let mut unchanged_count = 0;
-
-    // Find added and modified files
-    for (path, file2) in &map2 {
-        if let Some(file1) = map1.get(path) {
-            if file1.size != file2.size || file1.modified != file2.modified {
-                modified.push(FileDiff {
-                    path: path.clone(),
-                    status: DiffStatus::Modified,
-                    old_size: Some(file1.size),
-                    new_size: Some(file2.size),
-                    old_modified: Some(file1.modified),
-                    new_modified: Some(file2.modified),
-                });
-            } else {
-                unchanged_count += 1;
-            }
-        } else {
-            added.push(FileDiff {
-                path: path.clone(),
-                status: DiffStatus::Added,
-                old_size: None,
-                new_size: Some(file2.size),
-                old_modified: None,
-                new_modified: Some(file2.modified),
-            });
-        }
-    }
-
-    // Find deleted files
-    for (path, file1) in &map1 {
-        if !map2.contains_key(path) {
-            deleted.push(FileDiff {
-                path: path.clone(),
-                status: DiffStatus::Deleted,
-                old_size: Some(file1.size),
-                new_size: None,
-                old_modified: Some(file1.modified),
-                new_modified: None,
-            });
-        }
-    }
-
-    Ok(ComparisonResult {
-        snapshot1_id,
-        snapshot2_id,
-        added,
-        deleted,
-        modified,
-        unchanged_count,
-    })
+    let snapshot1 = drive_pulse_lib::load_snapshot(&snapshot1_id, password.as_deref())?;
+    let snapshot2 = drive_pulse_lib::load_snapshot(&snapshot2_id, password.as_deref())?;
+    Ok(drive_pulse_lib::compare_snapshots(&snapshot1, &snapshot2))
 }
 
 #[tauri::command]
 pub fn get_data_directory() -> Result<String, String> {
-    let data_dir = get_data_dir()?;
+    let data_dir = drive_pulse_lib::get_data_dir()?;
     let snapshots_dir = data_dir.join("snapshots");
     Ok(snapshots_dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub fn open_data_directory() -> Result<(), String> {
-    let data_dir = get_data_dir()?;
+    let data_dir = drive_pulse_lib::get_data_dir()?;
     let snapshots_dir = data_dir.join("snapshots");
     
     // Create the directory if it doesn't exist
@@ -360,7 +266,7 @@ pub fn open_data_directory() -> Result<(), String> {
 
 #[tauri::command]
 pub fn delete_snapshot(snapshot_id: String) -> Result<(), String> {
-    let data_dir = get_data_dir()?;
+    let data_dir = drive_pulse_lib::get_data_dir()?;
     let snapshots_dir = data_dir.join("snapshots");
     let metadata_dir = data_dir.join("metadata");
     
@@ -385,154 +291,3 @@ pub fn delete_snapshot(snapshot_id: String) -> Result<(), String> {
     Ok(())
 }
 
-// Helper functions
-
-fn get_data_dir() -> Result<std::path::PathBuf, String> {
-    let config = tauri::Config::default();
-    let data_dir = app_data_dir(&config).ok_or("Failed to get app data directory")?;
-    Ok(data_dir)
-}
-
-// Derive encryption key from password using SHA-256
-fn derive_key(password: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    let result = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
-    key
-}
-
-fn save_snapshot(snapshot: &Snapshot, encrypt: bool, password: Option<&str>) -> Result<(), String> {
-    let data_dir = get_data_dir()?;
-    let snapshots_dir = data_dir.join("snapshots");
-
-    fs::create_dir_all(&snapshots_dir).map_err(|e| e.to_string())?;
-
-    let snapshot_path = snapshots_dir.join(format!("{}.bin", snapshot.id));
-    
-    // Serialize using bincode
-    let serialized = bincode::serialize(snapshot)
-        .map_err(|e| format!("Failed to serialize: {}", e))?;
-    
-    let data_to_write = if encrypt {
-        let password = password.ok_or("Password required for encryption")?;
-        
-        // Derive key from password
-        let key = derive_key(password);
-        
-        // Create cipher
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("Failed to create cipher: {}", e))?;
-        
-        // Generate random nonce (12 bytes for AES-GCM)
-        let nonce_bytes: [u8; 12] = rand::random();
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        
-        // Encrypt
-        let ciphertext = cipher.encrypt(nonce, serialized.as_ref())
-            .map_err(|e| format!("Encryption failed: {}", e))?;
-        
-        // Prepend nonce to ciphertext (we need it for decryption)
-        let mut encrypted_data = nonce_bytes.to_vec();
-        encrypted_data.extend_from_slice(&ciphertext);
-        encrypted_data
-    } else {
-        serialized
-    };
-    
-    // Write to file
-    let mut file = fs::File::create(&snapshot_path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
-    file.write_all(&data_to_write)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-
-    Ok(())
-}
-
-fn save_snapshot_metadata(snapshot: &Snapshot) -> Result<(), String> {
-    let data_dir = get_data_dir()?;
-    let metadata_dir = data_dir.join("metadata");
-    
-    fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
-    
-    let summary = SnapshotSummary {
-        id: snapshot.id.clone(),
-        drive_path: snapshot.drive_path.clone(),
-        timestamp: snapshot.timestamp,
-        total_files: snapshot.total_files,
-        total_size: snapshot.total_size,
-        scan_duration: snapshot.scan_duration,
-    };
-    
-    let metadata_path = metadata_dir.join(format!("{}.json", snapshot.id));
-    let json = serde_json::to_string(&summary)
-        .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
-    
-    fs::write(&metadata_path, json)
-        .map_err(|e| format!("Failed to write metadata: {}", e))?;
-    
-    Ok(())
-}
-
-fn load_snapshot(snapshot_id: &str, password: Option<&str>) -> Result<Snapshot, String> {
-    // Try .bin first, then .json for backward compatibility
-    match load_snapshot_binary(snapshot_id, password) {
-        Ok(snapshot) => Ok(snapshot),
-        Err(_) => load_snapshot_json(snapshot_id),
-    }
-}
-
-fn load_snapshot_binary(snapshot_id: &str, password: Option<&str>) -> Result<Snapshot, String> {
-    let data_dir = get_data_dir()?;
-    let snapshot_path = data_dir.join("snapshots").join(format!("{}.bin", snapshot_id));
-
-    let mut file = fs::File::open(&snapshot_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
-    
-    let mut data = Vec::new();
-    file.read_to_end(&mut data)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
-    // Try to decrypt if password provided, otherwise try direct deserialization
-    let decrypted_data = if let Some(pwd) = password {
-        // Extract nonce (first 12 bytes)
-        if data.len() < 12 {
-            return Err("Invalid encrypted data".to_string());
-        }
-        
-        let (nonce_bytes, ciphertext) = data.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        
-        // Derive key from password
-        let key = derive_key(pwd);
-        
-        // Create cipher
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("Failed to create cipher: {}", e))?;
-        
-        // Decrypt
-        cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| format!("Decryption failed (wrong password?): {}", e))?
-    } else {
-        // Try unencrypted first
-        match bincode::deserialize::<Snapshot>(&data) {
-            Ok(_) => data, // It's unencrypted
-            Err(_) => return Err("File appears to be encrypted, password required".to_string()),
-        }
-    };
-    
-    // Deserialize using bincode
-    bincode::deserialize(&decrypted_data)
-        .map_err(|e| format!("Failed to deserialize: {}", e))
-}
-
-fn load_snapshot_json(snapshot_id: &str) -> Result<Snapshot, String> {
-    let data_dir = get_data_dir()?;
-    let snapshot_path = data_dir.join("snapshots").join(format!("{}.json", snapshot_id));
-
-    let content = fs::read_to_string(snapshot_path).map_err(|e| e.to_string())?;
-    let snapshot: Snapshot = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    Ok(snapshot)
-}

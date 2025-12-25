@@ -49,7 +49,7 @@ jobs:
           cd src-backend
           cargo build --release
 
-      - name: Debug: List target/release directory
+      - name: List target/release directory
         run: ls -al target/release
 
       - name: Upload Release Asset

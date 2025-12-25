@@ -23,5 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-/src-backend/target
+# Tauri and Rust
+src-backend/target/
+src-cli/target/
+
+# Rust
+**/*.rs.bk
+Cargo.lock

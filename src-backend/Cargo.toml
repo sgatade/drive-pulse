@@ -7,6 +7,10 @@ license = ""
 repository = ""
 edition = "2021"
 
+[lib]
+name = "drive_pulse_lib"
+path = "src/lib.rs"
+
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
 
@@ -21,6 +25,8 @@ bincode = "1.3"
 aes-gcm = "0.10"
 sha2 = "0.10"
 rand = "0.8"
+dirs = "5.0"
+indicatif = "0.17"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
