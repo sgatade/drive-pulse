@@ -9,59 +9,11 @@ on:
       - "v*"
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev pkg-config
-
-      - name: Install additional dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgdk-pixbuf2.0-dev libgtk-3-dev pkg-config
-
-      - name: Install additional dependencies for libsoup
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsoup2.4-dev pkg-config
-
-      - name: Install additional dependencies for WebKitGTK
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev pkg-config
-
-      - name: Build the binary
-        env:
-          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
-        run: |
-          cd src-backend
-          cargo build --release
-
-      - name: Build the CLI binary
-        run: |
-          cd src-cli
-          cargo build --release
-
-      - name: List target/release directory
-        run: |
-          echo "=== GUI Binary ==="
-          ls -al src-backend/target/release/drive-pulse
-          echo ""
-          echo "=== CLI Binary ==="
-          ls -al src-cli/target/release/drive-pulse-cli
-
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         id: create_release
@@ -74,15 +26,79 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Asset
+  build:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            gui_binary: drive-pulse
+            cli_binary: drive-pulse-cli
+            gui_asset_name: drive-pulse-gui-linux-x86_64
+            cli_asset_name: drive-pulse-cli-linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            gui_binary: drive-pulse
+            cli_binary: drive-pulse-cli
+            gui_asset_name: drive-pulse-gui-macos-x86_64
+            cli_asset_name: drive-pulse-cli-macos-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            gui_binary: drive-pulse.exe
+            cli_binary: drive-pulse-cli.exe
+            gui_asset_name: drive-pulse-gui-windows-x86_64.exe
+            cli_asset_name: drive-pulse-cli-windows-x86_64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev pkg-config
+
+      - name: Build the binary
+        env:
+          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
+        run: |
+          cd src-backend
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Build the CLI binary
+        run: |
+          cd src-cli
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: List target/release directory
+        shell: bash
+        run: |
+          echo "=== GUI Binary ==="
+          ls -lh src-backend/target/${{ matrix.target }}/release/${{ matrix.gui_binary }}
+          echo ""
+          echo "=== CLI Binary ==="
+          ls -lh src-cli/target/${{ matrix.target }}/release/${{ matrix.cli_binary }}
+
+      - name: Upload GUI Release Asset
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: src-backend/target/release/drive-pulse
-          asset_name: drive-pulse-gui-linux-x86_64
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src-backend/target/${{ matrix.target }}/release/${{ matrix.gui_binary }}
+          asset_name: ${{ matrix.gui_asset_name }}
           asset_content_type: application/octet-stream
 
       - name: Upload CLI Release Asset
@@ -91,7 +107,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: src-cli/target/release/drive-pulse-cli
-          asset_name: drive-pulse-cli-linux-x86_64
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: src-cli/target/${{ matrix.target }}/release/${{ matrix.cli_binary }}
+          asset_name: ${{ matrix.cli_asset_name }}
           asset_content_type: application/octet-stream
