@@ -50,13 +50,13 @@ jobs:
           cargo build --release
 
       - name: List target/release directory
-        run: ls -al target/release
+        run: ls -al src-backend/target/release
 
       - name: Upload Release Asset
         if: github.event_name == 'release'
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: target/release/drive-pulse
+          asset_path: src-backend/target/release/drive-pulse
           asset_name: drive-pulse
           asset_content_type: application/octet-stream
